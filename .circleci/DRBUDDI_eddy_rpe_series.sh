@@ -32,10 +32,9 @@ QSIPREP_CMD=$(run_qsiprep_cmd ${BIDS_INPUT_DIR} ${OUTPUT_DIR})
 ${QSIPREP_CMD} \
 	-w ${TEMPDIR} \
 	--sloppy \
-	--dwi-only \
+	--anat-modality none \
 	--denoise-method none \
-	--dwi-no-biascorr \
-	--output-space T1w \
+	--b1_biascorrect_stage none \
 	--pepolar-method DRBUDDI \
 	--eddy_config ${EDDY_CFG} \
 	--output-resolution 5 \

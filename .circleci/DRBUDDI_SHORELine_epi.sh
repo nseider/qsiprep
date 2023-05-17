@@ -31,10 +31,9 @@ QSIPREP_CMD=$(run_qsiprep_cmd ${BIDS_INPUT_DIR} ${OUTPUT_DIR})
 ${QSIPREP_CMD} \
 	-w ${TEMPDIR} \
 	--sloppy \
-	--dwi-only \
+	--anat-modality none \
 	--denoise-method none \
-	--dwi-no-biascorr \
-	--output-space T1w \
+	--b1-biascorrect-stage none \
 	--pepolar-method DRBUDDI \
 	--hmc-model none \
 	--output-resolution 2 \

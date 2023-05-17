@@ -48,13 +48,12 @@ def init_dwi_preproc_wf(dwi_only,
                         eddy_config,
                         raw_image_sdc,
                         reportlets_dir,
-                        output_spaces,
                         output_dir,
                         dwi_denoise_window,
                         denoise_method,
                         unringing_method,
                         pepolar_method,
-                        dwi_no_biascorr,
+                        b1_biascorrect_stage,
                         no_b0_harmonization,
                         denoise_before_combining,
                         template,
@@ -90,11 +89,10 @@ def init_dwi_preproc_wf(dwi_only,
                                   eddy_config=None,
                                   raw_image_sdc=False,
                                   reportlets_dir='.',
-                                  output_spaces=['T1w', 'template'],
                                   dwi_denoise_window=5,
                                   denoise_method='dwidenoise',
                                   unringing_method='none',
-                                  dwi_no_biascorr=False,
+                                  b1_biascorrect_stage='final',
                                   no_b0_harmonization=False,
                                   denoise_before_combining=True,
                                   template='MNI152NLin2009cAsym',
@@ -145,24 +143,14 @@ def init_dwi_preproc_wf(dwi_only,
             algorithm to use for removing Gibbs ringing. Options: none, mrdegibbs
         pepolar_method : str
             Either 'DRBUDDI' or 'TOPUP'. The method for SDC when EPI fieldmaps are used.
-        dwi_no_biascorr : bool
-            run spatial bias correction (N4) on dwi series
+        b1_biascorrect_stage : str
+            'final', 'none' or 'legacy'
         no_b0_harmonization : bool
             skip rescaling dwi scans to have matching b=0 intensities across scans
         denoise_before_combining : bool
             'run ``dwidenoise`` before combining dwis. Requires ``combine_all_dwis``'
         reportlets_dir : str
             Directory in which to save reportlets
-        output_spaces : list
-            List of output spaces functional images are to be resampled to.
-            Some parts of pipeline will only be instantiated for some output s
-            paces.
-
-            Valid spaces:
-
-                - T1w
-                - template
-
         template : str
             Name of template targeted by ``template`` output space
         output_dir : str
@@ -200,8 +188,6 @@ def init_dwi_preproc_wf(dwi_only,
         t1_seg
             Segmentation of preprocessed structural image, including
             gray-matter (GM), white-matter (WM) and cerebrospinal fluid (CSF)
-        t1_tpms
-            List of tissue probability maps in T1w space
         t1_2_mni_forward_transform
             ANTs-compatible affine-and-warp transform file
         t1_2_mni_reverse_transform
@@ -307,10 +293,10 @@ def init_dwi_preproc_wf(dwi_only,
     inputnode = pe.Node(
         niu.IdentityInterface(fields=[
             'dwi_files', 'sbref_file', 'subjects_dir', 'subject_id',
-            't1_preproc', 't1_brain', 't1_mask', 't1_seg', 't1_tpms',
-            't1_aseg', 't1_aparc', 't1_2_mni_forward_transform', 't2w_files',
+            't1_preproc', 't1_brain', 't1_mask', 't1_seg',
+            't1_aseg', 't1_aparc', 't1_2_mni_forward_transform', 't2w_unfatsat',
             't1_2_mni_reverse_transform', 't1_2_fsnative_forward_transform',
-            't1_2_fsnative_reverse_transform', 'dwi_sampling_grid']),
+            't1_2_fsnative_reverse_transform', 't2w_files', 'dwi_sampling_grid']),
         name='inputnode')
     outputnode = pe.Node(
         niu.IdentityInterface(fields=[
@@ -332,8 +318,8 @@ Diffusion data preprocessing
                                      dwi_denoise_window=dwi_denoise_window,
                                      denoise_method=denoise_method,
                                      unringing_method=unringing_method,
-                                     dwi_no_biascorr=dwi_no_biascorr,
                                      no_b0_harmonization=no_b0_harmonization,
+                                     b1_biascorrect_stage=b1_biascorrect_stage,
                                      orientation='LAS' if hmc_model == 'eddy' else 'LPS',
                                      source_file=source_file,
                                      low_mem=low_mem,
@@ -390,7 +376,7 @@ Diffusion data preprocessing
         (inputnode, hmc_wf, [
             ('t1_brain', 'inputnode.t1_brain'),
             ('t1_mask', 'inputnode.t1_mask'),
-            ('t2w_files', 'inputnode.t2w_files'),
+            ('t2w_unfatsat', 'inputnode.t2w_unfatsat'),
             ('t1_2_mni_reverse_transform', 'inputnode.t1_2_mni_reverse_transform')]),
         (pre_hmc_wf, outputnode, [
             ('outputnode.qc_file', 'raw_qc_file'),
@@ -443,8 +429,11 @@ Diffusion data preprocessing
 
     elif fieldmap_type in ("epi", "rpe_series"):
 
-        extended_pepolar_report_wf = init_extended_pepolar_report_wf(
-            segment_t2w=t2w_sdc, omp_nthreads=omp_nthreads)
+        if os.path.exists(t2w_sdc):
+            extended_pepolar_report_wf = init_extended_pepolar_report_wf(
+                segment_t2w=t2w_sdc, omp_nthreads=omp_nthreads)
+        else:
+            extended_pepolar_report_wf = init_extended_pepolar_report_wf(omp_nthreads=omp_nthreads)
 
         ds_report_fa_sdc = pe.Node(
             DerivativesMaybeDataSink(
@@ -487,7 +476,6 @@ Diffusion data preprocessing
                 ("outputnode.b0_sdc_report", "in_file")])
         ])
 
-
     summary = pe.Node(
         DiffusionSummary(
             pe_direction=scan_groups['dwi_series_pedir'],
@@ -496,8 +484,7 @@ Diffusion data preprocessing
             hmc_transform=hmc_transform,
             impute_slice_threshold=impute_slice_threshold,
             denoise_method=denoise_method,
-            dwi_denoise_window=dwi_denoise_window,
-            output_spaces=output_spaces),
+            dwi_denoise_window=dwi_denoise_window),
         name='summary',
         mem_gb=DEFAULT_MEMORY_MIN_GB,
         run_without_submitting=True)

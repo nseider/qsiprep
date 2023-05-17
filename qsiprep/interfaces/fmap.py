@@ -340,8 +340,13 @@ def _despike2d(data, thres, neigh=None):
                     data[i, j, k] = patch_med
     return data
 
-
 def _unwrap(fmap_data, mag_file, mask=None):
+    import os
+    fsl_check = os.environ.get('FSL_BUILD')
+    if fsl_check=="no_fsl":
+        raise Exception(
+            """Container in use does not have FSL. To use this workflow, 
+            please download the qsiprep container with FSL installed.""")
     from math import pi
     from nipype.interfaces.fsl import PRELUDE
     magnii = nb.load(mag_file)
@@ -354,16 +359,15 @@ def _unwrap(fmap_data, mag_file, mask=None):
 
     nb.Nifti1Image(fmap_data, magnii.affine).to_filename('fmap_rad.nii.gz')
     nb.Nifti1Image(mask, magnii.affine).to_filename('fmap_mask.nii.gz')
-    nb.Nifti1Image(magnii.get_data(), magnii.affine).to_filename('fmap_mag.nii.gz')
+    nb.Nifti1Image(magnii.get_fdata(), magnii.affine).to_filename('fmap_mag.nii.gz')
 
     # Run prelude
     res = PRELUDE(phase_file='fmap_rad.nii.gz',
                   magnitude_file='fmap_mag.nii.gz',
                   mask_file='fmap_mask.nii.gz').run()
 
-    unwrapped = nb.load(res.outputs.unwrapped_phase_file).get_data() * (fmapmax / pi)
+    unwrapped = nb.load(res.outputs.unwrapped_phase_file).get_fdata() * (fmapmax / pi)
     return unwrapped
-
 
 def get_ees(in_meta, in_file=None):
     """
@@ -539,7 +543,7 @@ def _torads(in_file, fmap_range=None, newpath=None):
 
     out_file = fname_presuffix(in_file, suffix='_rad', newpath=newpath)
     fmapnii = nb.load(in_file)
-    fmapdata = fmapnii.get_data()
+    fmapdata = fmapnii.get_fdata()
 
     if fmap_range is None:
         fmap_range = max(abs(fmapdata.min()), fmapdata.max())
@@ -558,7 +562,7 @@ def _tohz(in_file, range_hz, newpath=None):
 
     out_file = fname_presuffix(in_file, suffix='_hz', newpath=newpath)
     fmapnii = nb.load(in_file)
-    fmapdata = fmapnii.get_data()
+    fmapdata = fmapnii.get_fdata()
     fmapdata = fmapdata * (range_hz / pi)
     out_img = nb.Nifti1Image(fmapdata, fmapnii.affine, fmapnii.header)
     out_img.set_data_dtype('float32')
@@ -592,7 +596,7 @@ def phdiff2fmap(in_file, delta_te, newpath=None):
 
     out_file = fname_presuffix(in_file, suffix='_fmap', newpath=newpath)
     image = nb.load(in_file)
-    data = (image.get_data().astype(np.float32) / (2. * math.pi * delta_te))
+    data = (image.get_fdata().astype(np.float32) / (2. * math.pi * delta_te))
     nii = nb.Nifti1Image(data, image.affine, image.header)
     nii.set_data_dtype(np.float32)
     nii.to_filename(out_file)
@@ -935,7 +939,7 @@ def get_evenly_spaced_b0s(b0_indices, max_per_spec):
     if len(b0_indices) <= max_per_spec:
         return b0_indices
     selected_indices = np.linspace(0, len(b0_indices)-1, num=max_per_spec,
-                                   endpoint=True, dtype=np.int)
+                                   endpoint=True, dtype=int)
     return [b0_indices[idx] for idx in selected_indices]
 
 
@@ -1160,8 +1164,8 @@ class _PEPOLARReportInputSpec(BaseInterfaceInputSpec):
     up_fa_corrected_image = File(exists=True)
     down_fa_image = File(exists=True)
     down_fa_corrected_image = File(exists=True)
-    t2w_seg = File(exists=True)
     t1w_seg = File(exists=True)
+    t2w_seg = File(exists=True)
 
 
 class _PEPOLARReportOutputSpec(reporting.ReportCapableOutputSpec):
@@ -1178,10 +1182,9 @@ class PEPOLARReport(SimpleInterface):
         """Generate a reportlet."""
         LOGGER.info('Generating a PEPOLAR visual report')
 
-        # Get a segmentation from an undistorted image as a reference
         ref_segmentation = self.inputs.t1w_seg if not \
             isdefined(self.inputs.t2w_seg) else self.inputs.t2w_seg
-
+        # Get a segmentation from an undistorted image as a reference
         seg_img = nb.load(ref_segmentation)
         b0_up_img = nb.load(self.inputs.b0_up_image)
         b0_down_img = nb.load(self.inputs.b0_down_image)
